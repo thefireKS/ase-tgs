@@ -72,6 +72,22 @@ fractional scale.
 Reading pixels goes through `Image.bytes` + `string.unpack` rather than
 `getPixel`, which measured ~25× faster.
 
+## Performance
+
+Export time is dominated by gzip — measured at **98%**, with contour tracing
+barely registering. So the compression level, not the algorithm, is the thing
+worth tuning. Level 6 sits at the knee: about 4× faster than level 9 for ~3%
+more bytes, and level 9 gains essentially nothing over level 8. Export starts at
+level 6 and escalates to 9 only when the result misses the 64 KB budget by
+little enough that the extra few percent could rescue it; art that is far over
+fails fast instead of grinding through a second pass that cannot help.
+
+Cost scales with the number of contours, not the pixel count, so dithered or
+noisy art is the expensive case. A typical 32×32 emoji exports in under 0.4 s.
+Worst-case synthetic noise at 128×128 takes ~2 s and at 256×256 ~12 s — and
+blows the size budget several times over regardless, so large or heavily
+dithered sources are not a good fit for this pipeline.
+
 ## Modules
 
 | File | Role |

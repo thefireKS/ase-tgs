@@ -10,6 +10,16 @@ local M = {}
 
 M.MAX_BYTES = 64 * 1024
 
+-- Compression dominates export time -- measured at 98% of it, with contour
+-- tracing barely registering. Level 6 is the knee of the curve: roughly 4x
+-- faster than level 9 for about 3% more bytes, and level 9 buys essentially
+-- nothing over level 8 while costing another half second. Start fast and only
+-- pay for maximum compression if the budget is actually missed.
+M.DEFAULT_LEVEL = 6
+M.MAX_LEVEL = 9
+-- How far over budget is still worth a second, slower compression pass.
+M.RETRY_MARGIN = 1.15
+
 --- Read one flattened frame as packed RGBA uint32s.
 -- Uses Image.bytes + string.unpack rather than per-pixel getPixel, which
 -- measured ~25x faster on this runtime.
@@ -103,8 +113,24 @@ function M.toTgsBytes(sprite, opts)
   local doc, stats = M.buildLottie(sprite, opts)
   local text = json.encode(doc)
   stats.jsonBytes = #text
-  local bytes = gzip.compress(LibDeflate, text, opts.level or 9)
+
+  local level = opts.level or M.DEFAULT_LEVEL
+  local bytes = gzip.compress(LibDeflate, text, level)
+  -- Retry at maximum compression only when it could plausibly help. Going from
+  -- level 6 to 9 recovers a few percent, so a file that is far past the budget
+  -- is unsalvageable and a second pass just burns seconds -- and the second
+  -- pass is expensive precisely for the oversized art that triggers it.
+  if not opts.level and level < M.MAX_LEVEL
+     and #bytes > M.MAX_BYTES and #bytes <= M.MAX_BYTES * M.RETRY_MARGIN then
+    local tighter = gzip.compress(LibDeflate, text, M.MAX_LEVEL)
+    if #tighter < #bytes then
+      bytes, level = tighter, M.MAX_LEVEL
+    end
+  end
+
+  stats.level = level
   stats.tgsBytes = #bytes
+  stats.problems = M.validate(stats)
   return bytes, stats, text
 end
 
