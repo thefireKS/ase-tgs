@@ -44,3 +44,7 @@ luac.out
 .venv/
 out/
 ref/
+
+# Build output
+build/
+dist/

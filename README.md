@@ -9,17 +9,34 @@ gzipped. Because the source is pixel art, the output is exact: every sticker in
 the test set round-trips through Telegram's own renderer without a single pixel
 of difference.
 
-## Status
-
-The conversion pipeline works and is verified end to end. **The Aseprite
-extension wrapper is not built yet** — there is no `package.json`, no menu
-command, no `.aseprite-extension` bundle. Today this runs headlessly:
+## Install
 
 ```bash
-make test
+make extension
 ```
 
-Verified on Aseprite 1.3.15.3 (arm64), Lua 5.4.
+Then in Aseprite: **Edit → Preferences → Extensions → Add Extension**, pick
+`dist/ase-tgs.aseprite-extension`, and restart. For development, `make install`
+drops the tree straight into Aseprite's extensions folder instead.
+
+The command lands in **File → Export → Export as .tgs (Telegram)…**.
+
+Verified on Aseprite 1.3.15.3 (arm64), Lua 5.4. Everything runs inside
+Aseprite's Lua sandbox — writing the file included, which works in both batch
+and GUI mode with no prompt.
+
+## Use
+
+The dialog covers the whole job:
+
+- **Frames** — the whole animation, a tag, or an explicit frame range
+- **Speed / Target FPS / Max colours** — the levers below; `0` leaves each alone
+- **Save to** — defaults next to the sprite, and remembers the folder
+
+An export that would break Telegram's limits is refused with a message naming
+the lever that fixes it, offering **Adjust** (reopens with your settings kept),
+**Export anyway**, or **Cancel**. A successful export reports the size against
+the 64 KB budget and anything the levers changed.
 
 ## Telegram's constraints
 
@@ -137,6 +154,8 @@ that.
 
 | File | Role |
 | --- | --- |
+| `extension/main.lua` | menu command + export dialog |
+| `extension/package.json` | extension manifest |
 | `src/pixel_trace.lua` | connected contours + collinear collapse |
 | `src/lottie_build.lua` | contours + timings → Lottie document, canvas fitting |
 | `src/json_encode.lua` | compact JSON (see the `ty` rule below) |
@@ -172,7 +191,8 @@ the file, and the final render by Telegram's own engine, so a bug in the writer
 cannot mask itself.
 
 ```bash
-make unit       # tracer invariants: shoelace area == filled pixel count
+make unit       # tracer invariants, frame selection, levers, limit enforcement
+make bundle     # the packaged extension works from its installed layout
 make export     # sprite -> .tgs, then contours diffed against source pixels
 make validate   # format + Telegram limits, via python-lottie
 make rlottie    # real rlottie render, diffed against Aseprite's PNG export
