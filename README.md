@@ -34,11 +34,12 @@ stop being asked. Nothing is written if you decline.
 The dialog follows Aseprite's own export dialog: output first, then what to
 export, then how to fit it.
 
-- **Output File** — an editable path, with a picker below it that fills it in.
-  Defaults next to the sprite, and the folder is remembered.
+- **Output File** — an editable path, with a `...` picker below it that fills it
+  in. Defaults next to the sprite, and the folder is remembered.
 - **Frames** — the whole animation, a tag, or an explicit frame range
 - **Speed %** — a slider from 25% to 400%, with the resulting running time shown
-  live underneath and flagged when it breaks the 3 s ceiling
+  live underneath and flagged when it breaks the 3 s ceiling. **Reset to 100%**
+  snaps back to the authored speed, which dragging cannot hit reliably.
 - **Target FPS / Max colours** — the other two levers; `0` leaves each alone
 
 The path sits above the picker rather than beside it because the scripting

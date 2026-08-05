@@ -36,6 +36,10 @@ end
 --- Speed is a percentage on the slider: 100 means "as authored".
 local SPEED_MIN, SPEED_MAX, SPEED_DEFAULT = 25, 400, 100
 
+--- Caption for the file picker. Matches the native export dialog, and reads as
+-- a control rather than as a duplicate of the path already shown above it.
+local BROWSE_LABEL = "..."
+
 local function rangeFrom(data)
   if data.mode == MODE_TAG then
     return { mode = "tag", tag = data.tag }
@@ -184,11 +188,24 @@ showDialog = function(plugin, prefill)
   -- editable entry rather than only a button; the picker below writes into it.
   -- (The scripting Dialog API puts every labelled widget on its own row, so the
   -- native "entry + ... button" single row cannot be reproduced here.)
+  --
+  -- The picker's caption comes from `filename`, not `text` -- `text` is ignored
+  -- on this widget -- so the label is set there and the starting directory is
+  -- carried separately by `path`. `filetypes` is deliberately omitted: it gets
+  -- appended to the caption, turning "..." into "...tgs". Nothing is lost, since
+  -- doExport forces the .tgs extension regardless of what comes back.
   dlg:entry{ id = "output", label = "Output File:", text = outPath }
-  dlg:file{ id = "browse", save = true, filetypes = { "tgs" }, filename = outPath,
+  dlg:file{ id = "browse", save = true,
+            filename = BROWSE_LABEL,
+            path = app.fs.filePath(outPath),
             onchange = function()
-              if dlg.data.browse and dlg.data.browse ~= "" then
-                dlg:modify{ id = "output", text = dlg.data.browse }
+              local picked = dlg.data.browse
+              if picked and picked ~= "" and picked ~= BROWSE_LABEL then
+                dlg:modify{ id = "output", text = picked }
+                -- picking replaces the caption with the chosen name; restore it
+                -- and reopen next time wherever the user just was
+                dlg:modify{ id = "browse", filename = BROWSE_LABEL,
+                            path = app.fs.filePath(picked) }
               end
             end }
 
@@ -213,6 +230,13 @@ showDialog = function(plugin, prefill)
               value = p.speedPct or prefs.speedPct or SPEED_DEFAULT,
               onchange = refresh }
   dlg:label{ id = "timing", label = "", text = "" }
+  -- Hitting an exact percentage by dragging is fiddly, so give the neutral
+  -- value a target. A button carrying an onclick does not close the dialog.
+  dlg:button{ id = "resetSpeed", text = "Reset to 100%",
+              onclick = function()
+                dlg:modify{ id = "speedPct", value = SPEED_DEFAULT }
+                refresh()
+              end }
   dlg:number{ id = "fps", label = "Target FPS:",
               text = tostring(p.fps or prefs.fps or 0), decimals = 0 }
   dlg:number{ id = "maxColors", label = "Max colours:",
