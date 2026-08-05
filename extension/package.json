@@ -2,7 +2,7 @@
   "name": "ase-tgs",
   "displayName": "Export as .tgs (Telegram)",
   "description": "Export pixel art as Telegram animated stickers and custom emoji, in one click.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "thefireKS"
   },
