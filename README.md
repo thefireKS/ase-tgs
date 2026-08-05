@@ -22,16 +22,28 @@ drops the tree straight into Aseprite's extensions folder instead.
 The command lands in **File → Export → Export as .tgs (Telegram)…**.
 
 Verified on Aseprite 1.3.15.3 (arm64), Lua 5.4. Everything runs inside
-Aseprite's Lua sandbox — writing the file included, which works in both batch
-and GUI mode with no prompt.
+Aseprite's Lua sandbox — writing the file included, with no external process.
+
+**On the Security prompt:** Aseprite gates file access from scripts behind a
+"Security" dialog. The first export may ask *"wants to write to this file"* —
+choose **Allow Write Access**, or tick **Give full trust to this script** to
+stop being asked. Nothing is written if you decline.
 
 ## Use
 
-The dialog covers the whole job:
+The dialog follows Aseprite's own export dialog: output first, then what to
+export, then how to fit it.
 
+- **Output File** — an editable path, with a picker below it that fills it in.
+  Defaults next to the sprite, and the folder is remembered.
 - **Frames** — the whole animation, a tag, or an explicit frame range
-- **Speed / Target FPS / Max colours** — the levers below; `0` leaves each alone
-- **Save to** — defaults next to the sprite, and remembers the folder
+- **Speed %** — a slider from 25% to 400%, with the resulting running time shown
+  live underneath and flagged when it breaks the 3 s ceiling
+- **Target FPS / Max colours** — the other two levers; `0` leaves each alone
+
+The path sits above the picker rather than beside it because the scripting
+Dialog API gives every labelled widget its own row — the single-row
+"entry + browse" of the native dialog is not reachable from Lua.
 
 An export that would break Telegram's limits is refused with a message naming
 the lever that fixes it, offering **Adjust** (reopens with your settings kept),

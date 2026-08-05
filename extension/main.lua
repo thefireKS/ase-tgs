@@ -33,24 +33,40 @@ local function defaultOutput(sprite, plugin)
   return app.fs.joinPath(dir, base .. ".tgs")
 end
 
+--- Speed is a percentage on the slider: 100 means "as authored".
+local SPEED_MIN, SPEED_MAX, SPEED_DEFAULT = 25, 400, 100
+
+local function rangeFrom(data)
+  if data.mode == MODE_TAG then
+    return { mode = "tag", tag = data.tag }
+  elseif data.mode == MODE_RANGE then
+    return { mode = "frames", from = data.from, to = data.to }
+  end
+  return { mode = "all" }
+end
+
 --- Translate dialog fields into exporter options. Zero means "off" for the
 -- levers so the dialog needs no extra checkboxes.
 local function optionsFrom(data, sprite)
-  local range
-  if data.mode == MODE_TAG then
-    range = { mode = "tag", tag = data.tag }
-  elseif data.mode == MODE_RANGE then
-    range = { mode = "frames", from = data.from, to = data.to }
-  else
-    range = { mode = "all" }
-  end
+  local speed = (data.speedPct or SPEED_DEFAULT) / 100
   return {
-    range     = range,
-    speed     = (data.speed and data.speed > 0 and data.speed ~= 1) and data.speed or nil,
+    range     = rangeFrom(data),
+    speed     = (speed ~= 1) and speed or nil,
     fps       = (data.fps and data.fps > 0) and data.fps or nil,
     maxColors = (data.maxColors and data.maxColors > 0) and data.maxColors or nil,
     name      = sprite.filename and app.fs.fileTitle(sprite.filename) or "emoji",
   }
+end
+
+--- Running time of the current selection, for the live readout under the
+-- slider. Only touches frame durations, never pixels, so it is cheap enough to
+-- recompute on every slider step.
+local function selectionSeconds(sprite, data)
+  local frames = reduce.selectFrames(sprite, rangeFrom(data))
+  if not frames then return nil end
+  local total = 0
+  for _, f in ipairs(frames) do total = total + f.duration end
+  return total / ((data.speedPct or SPEED_DEFAULT) / 100)
 end
 
 local showDialog   -- forward declaration: failure re-opens the dialog
@@ -95,7 +111,7 @@ local function doExport(plugin, sprite, data)
 
   plugin.preferences.lastDir    = app.fs.filePath(path)
   plugin.preferences.mode       = data.mode
-  plugin.preferences.speed      = data.speed
+  plugin.preferences.speedPct   = data.speedPct
   plugin.preferences.fps        = data.fps
   plugin.preferences.maxColors  = data.maxColors
 
@@ -140,38 +156,68 @@ showDialog = function(plugin, prefill)
   if mode == MODE_TAG and not hasTags then mode = MODE_ALL end
 
   local dlg = Dialog{ title = "Export as .tgs" }
+  local outPath = p.output or defaultOutput(sprite, plugin)
 
   local function refresh()
     local m = dlg.data.mode
     dlg:modify{ id = "tag",  visible = (m == MODE_TAG) }
     dlg:modify{ id = "from", visible = (m == MODE_RANGE) }
     dlg:modify{ id = "to",   visible = (m == MODE_RANGE) }
+
+    -- Show what the current settings actually produce. The 3 s ceiling is the
+    -- limit people hit first, so say plainly when it is breached instead of
+    -- letting them find out only on export.
+    local secs = selectionSeconds(sprite, dlg.data)
+    local speed = (dlg.data.speedPct or SPEED_DEFAULT) / 100
+    local note
+    if not secs then
+      note = "-"
+    elseif secs > 3.0 + 1e-9 then
+      note = string.format("%.2fx  %.2f s  -- over the 3 s limit", speed, secs)
+    else
+      note = string.format("%.2fx  %.2f s", speed, secs)
+    end
+    dlg:modify{ id = "timing", text = note }
   end
 
+  -- Output first, mirroring Aseprite's own export dialog. The path is an
+  -- editable entry rather than only a button; the picker below writes into it.
+  -- (The scripting Dialog API puts every labelled widget on its own row, so the
+  -- native "entry + ... button" single row cannot be reproduced here.)
+  dlg:entry{ id = "output", label = "Output File:", text = outPath }
+  dlg:file{ id = "browse", save = true, filetypes = { "tgs" }, filename = outPath,
+            onchange = function()
+              if dlg.data.browse and dlg.data.browse ~= "" then
+                dlg:modify{ id = "output", text = dlg.data.browse }
+              end
+            end }
+
+  dlg:separator()
   dlg:combobox{ id = "mode", label = "Frames:", option = mode, options = modes,
                 onchange = refresh }
   if hasTags then
-    dlg:combobox{ id = "tag", label = "Tag:", option = p.tag or tagNames[1], options = tagNames }
+    dlg:combobox{ id = "tag", label = "Tag:", option = p.tag or tagNames[1],
+                  options = tagNames, onchange = refresh }
   else
     -- keep the field present so dlg.data.tag is always defined
     dlg:combobox{ id = "tag", label = "Tag:", option = "", options = { "" } }
   end
-  dlg:number{ id = "from", label = "From frame:", text = tostring(p.from or 1), decimals = 0 }
-  dlg:number{ id = "to",   label = "To frame:",   text = tostring(p.to or #sprite.frames), decimals = 0 }
+  dlg:number{ id = "from", label = "From frame:", text = tostring(p.from or 1),
+              decimals = 0, onchange = refresh }
+  dlg:number{ id = "to", label = "To frame:", text = tostring(p.to or #sprite.frames),
+              decimals = 0, onchange = refresh }
 
   dlg:separator{ text = "Fitting Telegram's limits" }
-  dlg:number{ id = "speed", label = "Speed:",
-              text = tostring(p.speed or prefs.speed or 1), decimals = 2 }
+  dlg:slider{ id = "speedPct", label = "Speed %:",
+              min = SPEED_MIN, max = SPEED_MAX,
+              value = p.speedPct or prefs.speedPct or SPEED_DEFAULT,
+              onchange = refresh }
+  dlg:label{ id = "timing", label = "", text = "" }
   dlg:number{ id = "fps", label = "Target FPS:",
               text = tostring(p.fps or prefs.fps or 0), decimals = 0 }
   dlg:number{ id = "maxColors", label = "Max colours:",
               text = tostring(p.maxColors or prefs.maxColors or 0), decimals = 0 }
   dlg:label{ label = "", text = "0 = leave as is" }
-
-  dlg:separator()
-  dlg:file{ id = "output", label = "Save to:", save = true,
-            filename = p.output or defaultOutput(sprite, plugin),
-            filetypes = { "tgs" } }
 
   dlg:separator()
   dlg:button{ id = "ok", text = "Export", focus = true }
