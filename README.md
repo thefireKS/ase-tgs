@@ -34,17 +34,20 @@ stop being asked. Nothing is written if you decline.
 The dialog follows Aseprite's own export dialog: output first, then what to
 export, then how to fit it.
 
-- **Output File** — an editable path, with a `...` picker below it that fills it
-  in. Defaults next to the sprite, and the folder is remembered.
+- **Output File** — an editable path with a `...` picker beside it. Defaults
+  next to the sprite, and the folder is remembered.
 - **Frames** — the whole animation, a tag, or an explicit frame range
 - **Speed %** — a slider from 25% to 400%, with the resulting running time shown
   live underneath and flagged when it breaks the 3 s ceiling. **Reset to 100%**
   snaps back to the authored speed, which dragging cannot hit reliably.
 - **Target FPS / Max colours** — the other two levers; `0` leaves each alone
 
-The path sits above the picker rather than beside it because the scripting
-Dialog API gives every labelled widget its own row — the single-row
-"entry + browse" of the native dialog is not reachable from Lua.
+The output row comes from `dlg:file{ entry = true }`. Without that flag the
+widget is a single wide button captioned with the filename, which reads as a
+label rather than a control; `entry = true` splits it into the editable path
+plus a small `...` button, matching the native dialog. Worth knowing, because
+the scripting Dialog API otherwise gives every labelled widget its own row —
+only buttons share one — so no arrangement of separate widgets reproduces it.
 
 An export that would break Telegram's limits is refused with a message naming
 the lever that fixes it, offering **Adjust** (reopens with your settings kept),

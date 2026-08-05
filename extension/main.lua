@@ -36,10 +36,6 @@ end
 --- Speed is a percentage on the slider: 100 means "as authored".
 local SPEED_MIN, SPEED_MAX, SPEED_DEFAULT = 25, 400, 100
 
---- Caption for the file picker. Matches the native export dialog, and reads as
--- a control rather than as a duplicate of the path already shown above it.
-local BROWSE_LABEL = "..."
-
 local function rangeFrom(data)
   if data.mode == MODE_TAG then
     return { mode = "tag", tag = data.tag }
@@ -184,30 +180,11 @@ showDialog = function(plugin, prefill)
     dlg:modify{ id = "timing", text = note }
   end
 
-  -- Output first, mirroring Aseprite's own export dialog. The path is an
-  -- editable entry rather than only a button; the picker below writes into it.
-  -- (The scripting Dialog API puts every labelled widget on its own row, so the
-  -- native "entry + ... button" single row cannot be reproduced here.)
-  --
-  -- The picker's caption comes from `filename`, not `text` -- `text` is ignored
-  -- on this widget -- so the label is set there and the starting directory is
-  -- carried separately by `path`. `filetypes` is deliberately omitted: it gets
-  -- appended to the caption, turning "..." into "...tgs". Nothing is lost, since
-  -- doExport forces the .tgs extension regardless of what comes back.
-  dlg:entry{ id = "output", label = "Output File:", text = outPath }
-  dlg:file{ id = "browse", save = true,
-            filename = BROWSE_LABEL,
-            path = app.fs.filePath(outPath),
-            onchange = function()
-              local picked = dlg.data.browse
-              if picked and picked ~= "" and picked ~= BROWSE_LABEL then
-                dlg:modify{ id = "output", text = picked }
-                -- picking replaces the caption with the chosen name; restore it
-                -- and reopen next time wherever the user just was
-                dlg:modify{ id = "browse", filename = BROWSE_LABEL,
-                            path = app.fs.filePath(picked) }
-              end
-            end }
+  -- Output first, mirroring Aseprite's own export dialog. `entry = true` is what
+  -- makes file{} render as an editable path with a small "..." button beside it
+  -- on one row, instead of a single wide button captioned with the filename.
+  dlg:file{ id = "output", label = "Output File:", save = true,
+            entry = true, filename = outPath, filetypes = { "tgs" } }
 
   dlg:separator()
   dlg:combobox{ id = "mode", label = "Frames:", option = mode, options = modes,
