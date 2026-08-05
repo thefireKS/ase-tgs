@@ -11,9 +11,10 @@ all: test
 ## Full regression suite, cheapest checks first.
 test: unit export validate rlottie
 
-## Contour tracer invariants. No Aseprite document needed.
+## Contour tracer invariants, frame selection, levers, limit enforcement.
 unit:
 	@$(ASEPRITE) -b --script tests/trace_test.lua
+	@$(ASEPRITE) -b --script tests/levers_test.lua
 
 ## Sprite -> .tgs for every test sprite, plus out/manifest.json.
 ## Also diffs the traced contours against the source pixels.

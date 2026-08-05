@@ -88,6 +88,51 @@ Worst-case synthetic noise at 128×128 takes ~2 s and at 256×256 ~12 s — and
 blows the size budget several times over regardless, so large or heavily
 dithered sources are not a good fit for this pipeline.
 
+Because compression is the expensive half, `prepare()` runs everything up to it
+and projects the final size from the JSON length. An export whose best possible
+compressed size still misses the budget is refused before a single byte is
+compressed, which is what keeps hopeless art from freezing the editor.
+
+## Selecting frames, and fitting the limits
+
+Range selection mirrors Aseprite's own export dialog:
+
+```lua
+exporter.export(sprite, path, { range = { mode = "all" } })
+exporter.export(sprite, path, { range = { mode = "tag", tag = "walk" } })
+exporter.export(sprite, path, { range = { mode = "frames", from = 2, to = 20 } })
+```
+
+Exports that would break Telegram's limits are **refused**, with a message
+naming the lever that fixes them — passing `force = true` overrides. Three
+levers, which do genuinely different things:
+
+| Option | Effect | Use for |
+| --- | --- | --- |
+| `speed = 2` | keeps every frame, halves the running time | the 3 s limit |
+| `fps = 10` | keeps the running time, drops frames | the 64 KB limit |
+| `maxColors = 8` | merges the rare colours into the palette | the 64 KB limit |
+
+`fps` never upsamples. Note it drops frames rather than lowering Lottie's `fr`:
+in a flipbook the layer count follows the number of distinct source frames, so
+changing `fr` alone renumbers `ip`/`op` and saves nothing.
+
+`maxColors` keeps the most-used colours and snaps the rest to their nearest
+survivor. How well it pays depends on whether the art has a real palette of flat
+regions — merging two shades of a large area removes whole contours, whereas on
+fine anti-aliased detail the shapes stay just as complex:
+
+| `maxColors` | 32×32 emoji (40 colours) | 160×160 detailed art (76 colours) |
+| --- | --- | --- |
+| 16 | −15% | −6% |
+| 8 | −31% | −10% |
+| 4 | −40% | −14% |
+
+The practical ceiling for this pipeline is roughly a 64×64 sprite. The 160×160
+art tested here stays 2.6–26× over budget even at 6 fps and 16 colours, because
+its cost is shape complexity rather than palette size, and no lever addresses
+that.
+
 ## Modules
 
 | File | Role |

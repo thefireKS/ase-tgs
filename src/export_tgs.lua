@@ -5,6 +5,7 @@ local gzip       = require("gzip")
 local json       = require("json_encode")
 local trace      = require("pixel_trace")
 local lottie     = require("lottie_build")
+local reduce     = require("reduce")
 
 local M = {}
 
@@ -20,6 +21,12 @@ M.MAX_LEVEL = 9
 -- How far over budget is still worth a second, slower compression pass.
 M.RETRY_MARGIN = 1.15
 
+-- Lowest gzip ratio observed on real art (measured 13x-24x). Used only to rule
+-- work out: if even this optimistic ratio leaves us over budget, no compression
+-- setting can rescue the file, and compressing it anyway costs seconds on
+-- exactly the oversized art that triggers the case.
+M.GZIP_RATIO_FLOOR = 12
+
 --- Read one flattened frame as packed RGBA uint32s.
 -- Uses Image.bytes + string.unpack rather than per-pixel getPixel, which
 -- measured ~25x faster on this runtime.
@@ -31,12 +38,12 @@ local function readFrame(sprite, frameNumber, spec)
   return { string.unpack(string.rep("I4", W * H), raw) }, raw
 end
 
---- Convert Aseprite's per-frame durations (seconds) into Lottie frame indices.
-local function timeline(sprite, fr)
+--- Map selected frame durations onto Lottie frame indices.
+local function timeline(frames, fr)
   local marks = { 0 }
   local t = 0
-  for i = 1, #sprite.frames do
-    t = t + sprite.frames[i].duration
+  for i = 1, #frames do
+    t = t + frames[i].duration
     marks[i + 1] = math.floor(t * fr + 0.5)
   end
   -- guarantee every frame occupies at least one Lottie frame
@@ -46,21 +53,66 @@ local function timeline(sprite, fr)
   return marks, t
 end
 
+--- Count how many pixels each colour covers across the selected frames.
+local function countColors(sprite, frameList, spec)
+  local counts = {}
+  local W, H = spec.width, spec.height
+  for _, f in ipairs(frameList) do
+    local px = readFrame(sprite, f.number, spec)
+    for i = 1, W * H do
+      local v = px[i]
+      if (v >> 24) & 0xFF > 0 then counts[v] = (counts[v] or 0) + 1 end
+    end
+  end
+  return counts
+end
+
 --- Convert a sprite to a Lottie table plus stats. Does not touch the disk.
+-- @param opts {
+--   range     = { mode = "all"|"tag"|"frames", tag =, from =, to = },
+--   fps       = target rate to resample down to (never up),
+--   maxColors = palette ceiling,
+--   fr, canvas, minCoverage, name }
+-- @return doc, stats  (or nil, nil, error)
 function M.buildLottie(sprite, opts)
   opts = opts or {}
   local fr = opts.fr or lottie.DEFAULT_FR
   local W, H = sprite.width, sprite.height
   local spec = ImageSpec{ width = W, height = H, colorMode = ColorMode.RGB, transparentColor = 0 }
 
-  local marks, totalSeconds = timeline(sprite, fr)
+  local frameList, err = reduce.selectFrames(sprite, opts.range)
+  if not frameList then return nil, nil, err end
+  if #frameList == 0 then return nil, nil, "no frames selected" end
+
+  local sourceCount = #frameList
+  frameList = reduce.rescale(frameList, opts.speed)
+  frameList = reduce.decimate(frameList, opts.fps)
+
+  local marks, totalSeconds = timeline(frameList, fr)
+
+  local stats = {
+    loops = 0, verts = 0, colors = 0, dedup = 0,
+    frames = #frameList,
+    droppedFrames = sourceCount - #frameList,
+    mergedColors = 0,
+  }
+
+  -- Palette reduction needs to see every selected frame before it can decide
+  -- which colours are the real ones, so it costs one extra read pass. Reading
+  -- is cheap next to compression, and caching whole frames would not scale.
+  local colorMap
+  if opts.maxColors then
+    local kept
+    colorMap, kept, stats.mergedColors =
+      reduce.quantize(countColors(sprite, frameList, spec), opts.maxColors)
+    stats.paletteKept = kept
+  end
 
   local frames = {}
   local prevRaw = nil
-  local stats = { loops = 0, verts = 0, colors = 0, dedup = 0, frames = #sprite.frames }
 
-  for i = 1, #sprite.frames do
-    local px, raw = readFrame(sprite, i, spec)
+  for i, f in ipairs(frameList) do
+    local px, raw = readFrame(sprite, f.number, spec)
 
     if raw == prevRaw and #frames > 0 then
       -- identical to the previous frame: stretch that layer instead of
@@ -68,6 +120,13 @@ function M.buildLottie(sprite, opts)
       frames[#frames].op = marks[i + 1]
       stats.dedup = stats.dedup + 1
     else
+      if colorMap then
+        for k = 1, W * H do
+          local repl = colorMap[px[k]]
+          if repl then px[k] = repl end
+        end
+      end
+
       local byColor, ncol = trace.groupByColor(px, W, H)
       if ncol > stats.colors then stats.colors = ncol end
 
@@ -94,11 +153,11 @@ function M.buildLottie(sprite, opts)
 
   stats.layers = #frames
   stats.seconds = totalSeconds
-  -- Lottie frame at the midpoint of each source frame's on-screen time. The
+  -- Lottie frame at the midpoint of each selected frame's on-screen time. The
   -- rlottie regression test samples exactly here to line renders up with the
   -- original Aseprite frames.
   stats.sampleAt = {}
-  for i = 1, #sprite.frames do
+  for i = 1, #frameList do
     stats.sampleAt[i] = (marks[i] + marks[i + 1]) // 2
   end
   stats.scale = meta.scale
@@ -107,12 +166,45 @@ function M.buildLottie(sprite, opts)
   return doc, stats
 end
 
---- Full pipeline: sprite -> .tgs bytes.
-function M.toTgsBytes(sprite, opts)
-  opts = opts or {}
-  local doc, stats = M.buildLottie(sprite, opts)
+--- Everything except compression, so callers can see what they are in for
+-- before paying for it. Compression is ~98% of export time, so this is the
+-- cheap half.
+-- @return jsonText, stats  (or nil, nil, error)
+function M.prepare(sprite, opts)
+  local doc, stats, err = M.buildLottie(sprite, opts)
+  if not doc then return nil, nil, err end
   local text = json.encode(doc)
   stats.jsonBytes = #text
+  -- Best case even a perfect compressor could manage.
+  stats.floorBytes = math.floor(#text / M.GZIP_RATIO_FLOOR)
+  stats.overBudget = stats.floorBytes > M.MAX_BYTES
+  stats.overDuration = stats.seconds > lottie.MAX_DURATION + 1e-9
+  return text, stats
+end
+
+--- Full pipeline: sprite -> .tgs bytes.
+-- Refuses rather than writing a file Telegram will reject; pass opts.force to
+-- get the bytes anyway.
+-- @return bytes, stats, jsonText  (or nil, stats, error)
+function M.toTgsBytes(sprite, opts)
+  opts = opts or {}
+  local text, stats, err = M.prepare(sprite, opts)
+  if not text then return nil, nil, err end
+
+  if not opts.force then
+    if stats.overDuration then
+      return nil, stats, string.format(
+        "animation is %.2f s, over Telegram's 3 s limit -- export a tag or a "
+        .. "shorter frame range, or pass speed=%.2f to fit",
+        stats.seconds, stats.seconds / lottie.MAX_DURATION)
+    end
+    if stats.overBudget then
+      return nil, stats, string.format(
+        "projected size is at least %.0f KB, far over the 64 KB limit -- try "
+        .. "fewer frames (fps=), a smaller palette (maxColors=), or fewer "
+        .. "frames in range", stats.floorBytes / 1024)
+    end
+  end
 
   local level = opts.level or M.DEFAULT_LEVEL
   local bytes = gzip.compress(LibDeflate, text, level)
@@ -135,16 +227,18 @@ function M.toTgsBytes(sprite, opts)
 end
 
 --- Full pipeline including the write.
+-- @return stats  (or nil, error)
 function M.export(sprite, path, opts)
-  local bytes, stats, text = M.toTgsBytes(sprite, opts)
-  local f, err = io.open(path, "wb")
+  local bytes, stats, err = M.toTgsBytes(sprite, opts)
+  if not bytes then return nil, err end
+  local f, ioErr = io.open(path, "wb")
   if not f then
-    return nil, "cannot open " .. tostring(path) .. ": " .. tostring(err)
+    return nil, "cannot open " .. tostring(path) .. ": " .. tostring(ioErr)
   end
   f:write(bytes)
   f:close()
   stats.path = path
-  return stats, nil, text
+  return stats
 end
 
 --- Check the result against Telegram's published limits.
