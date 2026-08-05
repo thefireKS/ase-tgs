@@ -19,7 +19,7 @@ print("=== PACKAGED LAYOUT ===")
 for _, rel in ipairs({ "package.json", "main.lua",
                        "src/export_tgs.lua", "src/reduce.lua", "src/pixel_trace.lua",
                        "src/lottie_build.lua", "src/json_encode.lua", "src/gzip.lua",
-                       "vendor/LibDeflate.lua" }) do
+                       "src/paths.lua", "vendor/LibDeflate.lua" }) do
   local f = io.open(app.fs.joinPath(BUILD, rel), "r")
   check("bundled: " .. rel, f ~= nil)
   if f then f:close() end

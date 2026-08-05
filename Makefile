@@ -22,6 +22,7 @@ bundle: extension
 unit:
 	@$(ASEPRITE) -b --script tests/trace_test.lua
 	@$(ASEPRITE) -b --script tests/levers_test.lua
+	@$(ASEPRITE) -b --script tests/paths_test.lua
 
 ## Sprite -> .tgs for every test sprite, plus out/manifest.json.
 ## Also diffs the traced contours against the source pixels.

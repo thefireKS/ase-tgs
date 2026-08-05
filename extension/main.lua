@@ -4,7 +4,7 @@
 -- integration -- menu registration, the dialog, and turning refusals into
 -- something a person can act on.
 
-local exporter, reduce
+local exporter, reduce, paths
 
 --- Modules are loaded relative to the installed extension, whose location is
 -- only known at runtime.
@@ -17,6 +17,7 @@ local function loadModules(plugin)
   }, ";")
   exporter = require("export_tgs")
   reduce   = require("reduce")
+  paths    = require("paths")
 end
 
 local MODE_ALL, MODE_TAG, MODE_RANGE = "Whole animation", "Tag", "Frame range"
@@ -30,7 +31,7 @@ local function defaultOutput(sprite, plugin)
     dir = dir or app.fs.filePath(sprite.filename)
   end
   dir = dir or app.fs.userDocsPath
-  return app.fs.joinPath(dir, base .. ".tgs")
+  return paths.absolute(app.fs.joinPath(dir, base .. ".tgs"))
 end
 
 --- Speed is a percentage on the slider: 100 means "as authored".
@@ -74,15 +75,14 @@ local showDialog   -- forward declaration: failure re-opens the dialog
 --- Run the export and report. Returns true when a file was written.
 local function doExport(plugin, sprite, data)
   local opts = optionsFrom(data, sprite)
-  local path = data.output
+  -- Never trust the widget's value to be absolute; see src/paths.lua.
+  local path = paths.absolute(data.output)
 
   if not path or path == "" then
     app.alert{ title = "Export .tgs", text = "Choose where to save the file." }
     return false
   end
-  if app.fs.fileExtension(path):lower() ~= "tgs" then
-    path = path .. ".tgs"
-  end
+  path = paths.withExtension(path, "tgs")
 
   local stats, err = exporter.export(sprite, path, opts)
 
@@ -156,7 +156,7 @@ showDialog = function(plugin, prefill)
   if mode == MODE_TAG and not hasTags then mode = MODE_ALL end
 
   local dlg = Dialog{ title = "Export as .tgs" }
-  local outPath = p.output or defaultOutput(sprite, plugin)
+  local outPath = paths.absolute(p.output) or defaultOutput(sprite, plugin)
 
   local function refresh()
     local m = dlg.data.mode
@@ -184,7 +184,15 @@ showDialog = function(plugin, prefill)
   -- makes file{} render as an editable path with a small "..." button beside it
   -- on one row, instead of a single wide button captioned with the filename.
   dlg:file{ id = "output", label = "Output File:", save = true,
-            entry = true, filename = outPath, filetypes = { "tgs" } }
+            entry = true, filename = outPath, filetypes = { "tgs" },
+            onchange = function()
+              local raw = dlg.data.output
+              local abs = paths.absolute(raw)
+              -- writing the same value back would just re-fire onchange
+              if abs and abs ~= raw then
+                dlg:modify{ id = "output", filename = abs }
+              end
+            end }
 
   dlg:separator()
   dlg:combobox{ id = "mode", label = "Frames:", option = mode, options = modes,
