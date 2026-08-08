@@ -25,6 +25,21 @@ function M.absolute(p, base)
   return app.fs.normalizePath(p)
 end
 
+--- If the value names a directory rather than a file, put `base` inside it.
+--
+-- Picking a folder in the save dialog rather than typing a name yields a
+-- directory, which is not somewhere a file can be written. The widget reports
+-- directories with a trailing separator, which is what distinguishes them from
+-- an extension-less filename the user typed on purpose.
+function M.ensureFile(p, base)
+  if not p or p == "" then return p end
+  local last = p:sub(-1)
+  if last == "/" or last == "\\" then
+    return app.fs.joinPath(p, base)
+  end
+  return p
+end
+
 --- Ensure the path ends in the given extension.
 function M.withExtension(p, ext)
   if not p or p == "" then return p end

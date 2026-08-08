@@ -59,6 +59,48 @@ local once = paths.absolute(rel, BASE)
 check("relative settles in one pass", paths.absolute(once, BASE), once)
 
 print("")
+print("=== values the widget actually produces ===")
+-- Observed by driving the widget in a live editor session: it keeps its own
+-- directory and re-expresses anything handed to it relative to that, so after
+-- picking Downloads and then an art file the reported value looked like this.
+-- Collapsing it has to land on the file the user really chose.
+check("widget's relative-to-its-own-dir form",
+  paths.absolute("/Users/kirill/Downloads/../projects/art/x.tgs"),
+  "/Users/kirill/projects/art/x.tgs")
+check("after several picks",
+  paths.absolute("/Users/kirill/Downloads/../../kirill/projects/art/x.tgs"),
+  "/Users/kirill/projects/art/x.tgs")
+
+print("")
+print("=== ensureFile: picking a folder instead of typing a name ===")
+check("trailing slash gets the base appended",
+  paths.ensureFile("/Users/kirill/Downloads/", "Sprite.tgs"),
+  "/Users/kirill/Downloads/Sprite.tgs")
+check("a real filename is left alone",
+  paths.ensureFile("/Users/kirill/Downloads/x.tgs", "Sprite.tgs"),
+  "/Users/kirill/Downloads/x.tgs")
+check("extension-less name is treated as a filename, not a folder",
+  paths.ensureFile("/Users/kirill/Downloads/x", "Sprite.tgs"),
+  "/Users/kirill/Downloads/x")
+check("backslash separator too",
+  paths.ensureFile("C:\\Users\\kirill\\", "Sprite.tgs"),
+  app.fs.joinPath("C:\\Users\\kirill\\", "Sprite.tgs"))
+check("empty passes through", paths.ensureFile("", "Sprite.tgs"), "")
+check("idempotent", paths.ensureFile(
+  paths.ensureFile("/Users/kirill/Downloads/", "Sprite.tgs"), "Sprite.tgs"),
+  "/Users/kirill/Downloads/Sprite.tgs")
+
+print("")
+print("=== the folder case end to end, as doExport chains them ===")
+do
+  local picked = "/Users/kirill/Downloads/"
+  local p = paths.withExtension(
+    paths.ensureFile(paths.absolute(picked), "Sprite.tgs"), "tgs")
+  check("picking a folder yields a writable file path",
+    p, "/Users/kirill/Downloads/Sprite.tgs")
+end
+
+print("")
 print("=== withExtension ===")
 check("adds when missing", paths.withExtension("/a/b", "tgs"), "/a/b.tgs")
 check("keeps when present", paths.withExtension("/a/b.tgs", "tgs"), "/a/b.tgs")

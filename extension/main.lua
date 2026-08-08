@@ -75,13 +75,17 @@ local showDialog   -- forward declaration: failure re-opens the dialog
 --- Run the export and report. Returns true when a file was written.
 local function doExport(plugin, sprite, data)
   local opts = optionsFrom(data, sprite)
-  -- Never trust the widget's value to be absolute; see src/paths.lua.
+  -- Never trust the widget's value to be absolute, or even to name a file; see
+  -- src/paths.lua.
   local path = paths.absolute(data.output)
 
   if not path or path == "" then
     app.alert{ title = "Export .tgs", text = "Choose where to save the file." }
     return false
   end
+  local base = sprite.filename and sprite.filename ~= ""
+    and app.fs.fileTitle(sprite.filename) or "emoji"
+  path = paths.ensureFile(path, base .. ".tgs")
   path = paths.withExtension(path, "tgs")
 
   local stats, err = exporter.export(sprite, path, opts)
@@ -183,16 +187,15 @@ showDialog = function(plugin, prefill)
   -- Output first, mirroring Aseprite's own export dialog. `entry = true` is what
   -- makes file{} render as an editable path with a small "..." button beside it
   -- on one row, instead of a single wide button captioned with the filename.
+  -- No onchange normalisation here, deliberately. The widget keeps its own
+  -- directory and re-expresses whatever it is handed relative to that, so
+  -- writing an absolute path back does not stick -- it comes out as
+  -- ".../Downloads/../projects/art/x.tgs" and the next write compounds it.
+  -- Worse, modify() re-fires onchange, which is what overflowed the stack.
+  -- The value is normalised where it is actually used instead: on export, and
+  -- when the dialog reopens.
   dlg:file{ id = "output", label = "Output File:", save = true,
-            entry = true, filename = outPath, filetypes = { "tgs" },
-            onchange = function()
-              local raw = dlg.data.output
-              local abs = paths.absolute(raw)
-              -- writing the same value back would just re-fire onchange
-              if abs and abs ~= raw then
-                dlg:modify{ id = "output", filename = abs }
-              end
-            end }
+            entry = true, filename = outPath, filetypes = { "tgs" } }
 
   dlg:separator()
   dlg:combobox{ id = "mode", label = "Frames:", option = mode, options = modes,
