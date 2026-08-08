@@ -41,16 +41,9 @@ local SPEED_MIN, SPEED_MAX, SPEED_DEFAULT = 25, 400, 100
 -- loading the exporter just to read a constant.
 local lottieMaxSeconds = 3.0
 
---- Fixed footprint for the warning line. Reserved whether or not the warning
--- is showing, so the dialog never changes size.
-local WARN_W, WARN_H = 210, 11
-
---- Theme text colour, so the warning stays legible in light and dark themes.
-local function warningTextColor()
-  local ok, c = pcall(function() return app.theme.color.text end)
-  if ok and c then return c end
-  return Color{ r = 0, g = 0, b = 0 }
-end
+--- Kept short on purpose: a longer string would make this row wider than the
+-- slider above it and the whole dialog would grow when the warning appears.
+local OVER_LIMIT_TEXT = "! over the 3 s limit"
 
 local function rangeFrom(data)
   if data.mode == MODE_TAG then
@@ -177,6 +170,23 @@ showDialog = function(plugin, prefill)
   local dlg = Dialog{ title = "Export as .tgs" }
   local outPath = paths.absolute(p.output) or defaultOutput(sprite, plugin)
 
+  local function isOverLimit(data)
+    local secs = selectionSeconds(sprite, data)
+    return secs ~= nil and secs > lottieMaxSeconds + 1e-9
+  end
+
+  -- Seeded from the values the widgets are about to be created with, not from
+  -- dlg.data, so the warning is right the moment the dialog opens. Reading the
+  -- dialog before it is shown reports nothing, which is what left the warning
+  -- missing until the slider was nudged. refresh() keeps it current after that.
+  local overLimit = isOverLimit{
+    mode     = mode,
+    tag      = p.tag or tagNames[1],
+    from     = p.from or 1,
+    to       = p.to or #sprite.frames,
+    speedPct = p.speedPct or prefs.speedPct or SPEED_DEFAULT,
+  }
+
   local function refresh()
     local m = dlg.data.mode
     dlg:modify{ id = "tag",  visible = (m == MODE_TAG) }
@@ -190,7 +200,8 @@ showDialog = function(plugin, prefill)
     local speed = (dlg.data.speedPct or SPEED_DEFAULT) / 100
     dlg:modify{ id = "timing",
                 text = secs and string.format("%.2fx  %.2f s", speed, secs) or "-" }
-    dlg:repaint()   -- the warning canvas re-evaluates itself when it paints
+    dlg:modify{ id = "warn",
+                text = isOverLimit(dlg.data) and OVER_LIMIT_TEXT or "" }
   end
 
   -- Output first, mirroring Aseprite's own export dialog. `entry = true` is what
@@ -227,24 +238,13 @@ showDialog = function(plugin, prefill)
               value = p.speedPct or prefs.speedPct or SPEED_DEFAULT,
               onchange = refresh }
   dlg:label{ id = "timing", label = "", text = "" }
-  -- The over-limit warning lives on its own line, on a canvas of fixed size.
-  -- Putting it in the label above meant the text appearing and disappearing
-  -- resized the whole dialog; a canvas reserves its space whether or not
-  -- anything is painted into it, so nothing moves. "warning_box" is Aseprite's
-  -- own warning icon -- the one on "Recover Files" and the update banner.
-  dlg:canvas{ id = "warn", width = WARN_W, height = WARN_H,
-              onpaint = function(ev)
-                -- Worked out here rather than cached by refresh(): the first
-                -- paint can happen before refresh() has ever run, and a stale
-                -- flag then leaves the warning missing. Summing frame
-                -- durations is cheap enough to redo on every paint.
-                local secs = selectionSeconds(sprite, dlg.data)
-                if not secs or secs <= lottieMaxSeconds + 1e-9 then return end
-                local g = ev.context
-                g:drawThemeImage("warning_box", 0, 0)
-                g.color = warningTextColor()
-                g:fillText("over Telegram's 3 s limit", 13, 1)
-              end }
+  -- The warning gets its own line. Keeping it to its own short label is also
+  -- what stops the dialog resizing: the jumping came from appending it to the
+  -- timing text, which made that row wider than the slider and grew the whole
+  -- dialog. On its own line it stays well inside the widest column, so nothing
+  -- moves whether it is showing or not.
+  dlg:label{ id = "warn", label = "",
+             text = overLimit and OVER_LIMIT_TEXT or "" }
   -- Hitting an exact percentage by dragging is fiddly, so give the neutral
   -- value a target. A button carrying an onclick does not close the dialog.
   dlg:button{ id = "resetSpeed", text = "Reset to 100%",
